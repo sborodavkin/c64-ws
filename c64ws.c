@@ -39,6 +39,8 @@ char** ROBUF = (char**)0x00f9;
 
 // GETIN - get a character from default input device, missing in cbm.h
 unsigned char __fastcall__ (*cbm_k_getin)(void) = 0xffe4;
+unsigned char __fastcall__ (*cbm_k_clr)(void) = 0xe566;
+
 
 // Request-related defs.
 
@@ -74,7 +76,6 @@ const char* HTTP_RESPONSE_SERVER_ERROR = "http/1.1 500 server error\n\n";
 
 
 #define MAX_RESPONSE_SIZE 2048
-static char HTTP_RESPONSE[MAX_RESPONSE_SIZE];
 
 const char RESPONSE_OK = 0;
 const char RESPONSE_TOO_LONG_FILENAME = 1;
@@ -97,10 +98,7 @@ char* to_lower(char* input_str) {
 
 // Prints the intro text.
 void print_intro() {
-  int i;
-  for (i=0; i<20; i++) {
-    printf("\n");
-  }
+  cbm_k_clr();
   printf("**************************************\n");
   printf("*        C64-BASED HTTP SERVER       *\n");
   printf("*    (C) SERGEY BORODAVKIN, 2017.    *\n");
@@ -191,96 +189,49 @@ char _parse_request(char* request, struct http_request* result) {
 // Deals with request and creates the response string.
 // Memory for response must be pre-allocated.
 char _create_response(const struct http_request* request, char* response) {
-  /*
-  unsigned int max_filename_length = 255 - 14;
-  int file_size = 0;
-  int res = 0;
-  int i = 0;
-  char c;
-  char file_size_str[4];
-  char* filename = (unsigned char*) malloc(max_filename_length);
-  char* file_data = (unsigned char*) malloc(MAX_RESPONSE_SIZE - 100);
-  if (filename && file_data) {
-    filename = "0:";
-    if (strlen(request->url) == 1) {
-      filename = "0:index.htm";
-    } else {
-      strcat(filename, request->url+1);  // +1 to trim '/'
-    }    
-    strcat(filename, ",s,r");
-    printf("loading file %s", filename);
-    
-    cbm_k_close(2);
-    
-    res = cbm_open(6, 8, CBM_READ, filename);    
-    if (!res) {      
-      file_size = cbm_read(6, file_data, MAX_RESPONSE_SIZE);
-      if (file_size > 0) {
-        response = "";
-        strcat(response, "http/1.1 ");
-        strcat(response, HTTP_RESPONSE_CODE_200);
-        strcat(response, "\r\n");
-        strcat(response, "content-length: ");
-        sprintf(file_size_str, "%d", file_size);
-        strcat(response, file_size_str);
-        strcat(response, "\r\n");
-        strcat(response, file_data);      
-      } else {
-        printf("os_error %d\n", _oserror);
-        response = "";
-        strcat(response, HTTP_RESPONSE_SERVER_ERROR);
-      }
-      cbm_close(6);
-    } else {
-      printf("Error opening file [%s], code=%d\n", filename, res);
-    }
-    free(filename);
-    free(file_data);
-    
-    open_rs232();
-    
-  } else {
-    response = "";
-    strcat(response, HTTP_RESPONSE_SERVER_ERROR);
-  }
-  return 'a';
-  */
-  
   // 16 (max on C64) + 1 byte for \0 + 1 byte for \0 + 5 for disk ID and mode.
-  char* filename = (char*) malloc(16+1+5);  
-  char* file_data = (unsigned char*) malloc(2048);
+  unsigned char* filename = (unsigned char*) malloc(16+1+5);  
+  unsigned char* file_data = (unsigned char*) malloc(1024);
   int file_size = -1;
   int response_code = RESPONSE_OK;
   int open_code = 0;
+  int offset = 0;
+  int i = 0;
   char* content_length_str = "    ";  // Helper string to store CL as string.
 
-  response = "http/1.1 ";  
+  sprintf(response, "http/1.1 ");
   if (strlen(request->url) > 17) {
+    printf("%s is too long request URL\n", request->url);
     strcat(response, HTTP_RESPONSE_CODE_400);
     strcat(response, "\r\n");
     response_code = RESPONSE_TOO_LONG_FILENAME;
   } else {
     // Check for "GET / HTTP/1.1" - request index.htm by default.
     if (strlen(request->url) == 1) {
-      filename = "0:index.htm,s,r";
+      sprintf(filename, "0:index.htm,s,r");
     } else {
       sprintf(filename, "0:%s,s,r", request->url+1);  // +1 to trim leading '/'
     }
-    
+    printf("Opening %s...\n", filename);
     open_code = cbm_open(6, 8, CBM_READ, filename);
     if (open_code != 0) {
       if (open_code == 4) {
+        printf("Not found.\n");
         strcat(response, HTTP_RESPONSE_CODE_404);
         response_code = RESPONSE_NOT_FOUND;
       } else {
+        printf("Open error code=%d\n", open_code);
         strcat(response, HTTP_RESPONSE_CODE_400);
         response_code = RESPONSE_FILE_OPEN_PROBLEM;
       }
       strcat(response, "\r\n");
-    } else {      
+    } else {
+      printf("Reading from file...\n");
       file_size = cbm_read(6, file_data, 2048);
-      if (file_size = -1 || !file_size) {
+      printf("%d bytes read.\n", file_size);
+      if (file_size == -1 || !file_size) {
         // Generic error during file read.
+        printf("Error read file, _oserror=%d", _oserror);
         strcat(response, HTTP_RESPONSE_CODE_500);
         response_code = RESPONSE_FILE_READ_PROBLEM;
         strcat(response, "\r\n");
@@ -292,8 +243,13 @@ char _create_response(const struct http_request* request, char* response) {
         strcat(response, "content-length: ");        
         strcat(response, content_length_str);
         strcat(response, "\r\n");
-        strcat(response, file_data);  
-        strcat(response, "\r\n");        
+        offset = strlen(response);
+        for (i = 0; i < file_size; i++) {
+          *(response + offset + i) = *(file_data + i);
+        }
+        *(response + offset + i) = '\r';
+        *(response + offset + i + 1) = '\n';
+        *(response + offset + i + 2) = 0;        
       }
       cbm_close(6);  // Close the file only if it has been opened.
     }
@@ -306,16 +262,23 @@ char _create_response(const struct http_request* request, char* response) {
 
 void _handle_request(char* request, unsigned int size) {
   unsigned int i = 0;
-  char res;
+  char parse_code;
+  char response_code;
+  char* http_response;
   printf("Serving request:\n");
   for(; i < size; i++) {
     putchar(request[i]);
   }
-  res = _parse_request(request, &PARSED_REQUEST);
-  if (res == PARSE_RESULT_OK) {
-    _create_response(&PARSED_REQUEST, HTTP_RESPONSE);
+  parse_code = _parse_request(request, &PARSED_REQUEST);
+  if (parse_code == PARSE_RESULT_OK) {
+    http_response = (unsigned char*) malloc(MAX_REQUEST_SIZE);
+    if (http_response) {
+      response_code = _create_response(&PARSED_REQUEST, http_response);
+      printf(http_response);
+      free(http_response);
+    }
   } else {
-    printf("Error parsing request, code=%d\n", (int)res);
+    printf("Error parsing request, code=%d\n", (int)parse_code);
   }
 }
 
