@@ -170,8 +170,7 @@ char _parse_request(char* request, struct http_request* result) {
         space_2_idx = strchr(space_1_idx+1, ' ');
         if (space_2_idx) {
           *space_2_idx = 0; // ignore HTTP version
-          strncpy(result->url, space_1_idx+1,
-(int)(space_2_idx-space_1_idx));
+          strncpy(result->url, space_1_idx+1, (int)(space_2_idx-space_1_idx));
           return PARSE_RESULT_OK;
         } else {
           return PARSE_RESULT_NO_URL;
@@ -210,7 +209,8 @@ char _create_response(const struct http_request* request, char* response) {
     if (strlen(request->url) == 1) {
       sprintf(filename, "0:index.htm,s,r");
     } else {
-      sprintf(filename, "0:%s,s,r", request->url+1);  // +1 to trim leading '/'
+      // +1 to trim leading '/'
+      sprintf(filename, "0:%s,s,r", to_lower(request->url+1));
     }
     printf("Opening %s...\n", filename);
     open_code = cbm_open(6, 8, CBM_READ, filename);
