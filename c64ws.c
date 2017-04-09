@@ -82,6 +82,7 @@ const char RESPONSE_TOO_LONG_FILENAME = 1;
 const char RESPONSE_NOT_FOUND = 2;
 const char RESPONSE_FILE_OPEN_PROBLEM = 3;
 const char RESPONSE_FILE_READ_PROBLEM = 4;
+const char RESPONSE_MEMORY_PROBLEM = 5;
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -98,6 +99,14 @@ char* to_lower(char* input_str) {
 
 // Prints the intro text.
 void print_intro() {
+  int i = 0;
+  for(; i < 25; i++) {
+    printf('\n');
+  }
+  poke(53280, 0);
+  poke(53281, 0);
+  poke(646, 5);
+  
   cbm_k_clr();
   printf("**************************************\n");
   printf("*        C64-BASED HTTP SERVER       *\n");
@@ -185,9 +194,22 @@ char _parse_request(char* request, struct http_request* result) {
   return PARSE_RESULT_NO_LINE;
 }
 
+void _content_type(const char* filename, char* result) {  
+  char* file_extension = strstr(filename, ".") + 1;
+  if (strcmp(file_extension, "png") == 0) {
+    result = "image/png";
+  } else if (strcmp(file_extension, "htm") == 0) {
+    result = "text/html";
+  } else {
+    result = "text/html";
+  }
+  return;    
+}
+
 // Deals with request and creates the response string.
 // Memory for response must be pre-allocated.
-char _create_response(const struct http_request* request, char* response) {
+char _create_response(const struct http_request* request, char* response,
+                      int* response_length) {
   // 16 (max on C64) + 1 byte for \0 + 1 byte for \0 + 5 for disk ID and mode.
   unsigned char* filename = (unsigned char*) malloc(16+1+5);  
   unsigned char* file_data = (unsigned char*) malloc(1024);
@@ -197,6 +219,8 @@ char _create_response(const struct http_request* request, char* response) {
   int offset = 0;
   int i = 0;
   char* content_length_str = "    ";  // Helper string to store CL as string.
+  char* ctbuf;
+  int length = 0;
 
   sprintf(response, "http/1.1 ");
   if (strlen(request->url) > 17) {
@@ -239,17 +263,31 @@ char _create_response(const struct http_request* request, char* response) {
         sprintf(content_length_str, "%d", file_size);
         
         strcat(response, HTTP_RESPONSE_CODE_200);
-        strcat(response, "\r\n");
-        strcat(response, "content-length: ");        
+        strcat(response, "\r\n");        
+        strcat(response, "content-type ");
+        ctbuf = (char*) malloc(20);
+        if (!ctbuf) {
+          printf("Could't allocate 20 bytes for content type.");
+          return RESPONSE_MEMORY_PROBLEM;
+        }
+        _content_type(filename, ctbuf);
+        strcat(response, ctbuf);
+        free(ctbuf);
+        strcat(response, "\r\n");        
+        strcat(response, "content-length: ");       
         strcat(response, content_length_str);
         strcat(response, "\r\n");
+        length = strlen(response);  // Accumulate length up to here,
         offset = strlen(response);
         for (i = 0; i < file_size; i++) {
           *(response + offset + i) = *(file_data + i);
+          length++;
         }
         *(response + offset + i) = '\r';
         *(response + offset + i + 1) = '\n';
-        *(response + offset + i + 2) = 0;        
+        *(response + offset + i + 2) = 0;
+        length += 3;
+        *response_length = length;
       }
       cbm_close(6);  // Close the file only if it has been opened.
     }
@@ -265,6 +303,7 @@ void _handle_request(char* request, unsigned int size) {
   char parse_code;
   char response_code;
   char* http_response;
+  int length = 0;
   printf("Serving request:\n");
   for(; i < size; i++) {
     putchar(request[i]);
@@ -273,8 +312,13 @@ void _handle_request(char* request, unsigned int size) {
   if (parse_code == PARSE_RESULT_OK) {
     http_response = (unsigned char*) malloc(MAX_REQUEST_SIZE);
     if (http_response) {
-      response_code = _create_response(&PARSED_REQUEST, http_response);
-      printf(http_response);
+      int length = 0;
+      response_code = _create_response(&PARSED_REQUEST, http_response, &length);
+      if (response_code == RESPONSE_OK) {
+        for (i = 0; i < length; i++) {
+          putchar(http_response[i]);
+        }
+      }
       free(http_response);
     }
   } else {
