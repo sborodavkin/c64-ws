@@ -1,10 +1,10 @@
 import os
 import socket
 
-HOST, PORT = '', 9090
+HOST, PORT = '', 9091
 
 
-dev = os.open('/dev/pts/29', os.O_RDWR)
+dev = os.open("/dev/pts/24", os.O_RDWR)
 
 listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -23,14 +23,14 @@ while True:
     
     os.write(dev, request)
     
-    response = []  
-    while ':END:' not in ''.join(response):
-      response.append(os.read(dev, 1024))
-    
-    http_response = ''.join(response)
-    print http_response
-    
-    client_connection.sendall(http_response)
+    response = bytearray()
+
+    while ':END:' not in response:
+      response.extend(bytearray(os.read(dev, 4096)))
+    response = response[0:-5]
+    print response  # ' '.join(hex(x) for x in response)
+  
+    client_connection.send(response)
     client_connection.close()
 
-    response = []
+    response = bytearray()
