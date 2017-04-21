@@ -207,11 +207,16 @@ char _parse_request(char* request, struct http_request* result) {
 }
 
 void _content_type(const char* filename, char* result) {
-  char* file_extension = strstr(filename, ".") + 1;
-  printf(file_extension);
-  if (strcmp(file_extension, "PNG") == 0) {
+  char* file_extension;
+  char* comma_pos;
+  char* stripped_ext = "     ";
+  file_extension = strstr(filename, ".") + 1;
+  comma_pos = strstr(filename, ",");
+  memcpy(stripped_ext, file_extension, comma_pos-file_extension);
+  stripped_ext[comma_pos-file_extension] = 0;
+  if (strcmp(stripped_ext, "png") == 0) {
     strcpy(result, "image/png");
-  } else if (strcmp(file_extension, "HTM") == 0) {
+  } else if (strcmp(stripped_ext, "htm") == 0) {
     strcpy(result, "text/html");
   } else {
     strcpy(result, "text/html");
@@ -226,13 +231,13 @@ char _create_response(const struct http_request* request, char* response,
   // 16 (max on C64) + 1 byte for \0 + 6 for disk ID and mode.
   unsigned char* filename = (unsigned char*) malloc(16+1+5);
   unsigned char* file_data = (unsigned char*) malloc(1024);
+  unsigned char ctbuf[20];
   int file_size = -1;
   int response_code = RESPONSE_OK;
   int open_code = 0;
   int offset = 0;
   int i = 0;
   char* content_length_str = "    ";  // Helper string to store CL as string.
-  char* ctbuf;
   int length = 0;
 
   sprintf(response, "http/1.1 ");
@@ -275,28 +280,19 @@ char _create_response(const struct http_request* request, char* response,
         strcat(response, "\r\n");
       } else {
         sprintf(content_length_str, "%d", file_size);
-
         strcat(response, HTTP_RESPONSE_CODE_200);
         strcat(response, "\r\n");
         strcat(response, "content-type: ");
-        ctbuf = (char*) malloc(20);
-        if (!ctbuf) {
-          printf("Could't allocate 20 bytes for content type.");
-          return RESPONSE_MEMORY_PROBLEM;
-        }
         _content_type(filename, ctbuf);
         strcat(response, to_lower(ctbuf));
-        free(ctbuf);
         strcat(response, "\r\n");
         strcat(response, "content-length: ");
         strcat(response, content_length_str);
         strcat(response, "\r\n\r\n");
         length = strlen(response);  // Accumulate length up to here,
         offset = strlen(response);
-        for (i = 0; i < file_size; i++) {
-          *(response + offset + i) = *(file_data + i);
-          length++;
-        }
+        memcpy(response + offset, file_data, file_size);
+        length += file_size;
         *response_length = length;
       }
       cbm_close(6);  // Close the file only if it has been opened.
@@ -315,31 +311,29 @@ void _handle_request(char* request, unsigned int size) {
   char* http_response;
   int length = 0;
   char* end_marker = ":end:";
+  to_upper(request);
   printf("Serving request:\n");
   for(; i < size; i++) {
     putchar(request[i]);
-  }
-  to_upper(request);
+  }  
   parse_code = _parse_request(request, &PARSED_REQUEST);
   if (parse_code == PARSE_RESULT_OK) {
     http_response = (unsigned char*) malloc(MAX_REQUEST_SIZE);
     if (http_response) {
       int length = 0;
-      response_code = _create_response(&PARSED_REQUEST, http_response, &length);      
+      response_code = _create_response(&PARSED_REQUEST, http_response, &length);
+      poke(154, RS232_HANDLER);
       for (i = 0; i < length; i++) {
         //if (_oserror = cbm_k_ckout(RS232_HANDLER)) {
         //  printf("Error opening output channel %d", _oserror);
-        //}
-        poke(154, RS232_HANDLER);
-        cbm_k_bsout(http_response[i]);
-        poke(154, 3);
+        //}        
+        cbm_k_bsout(*(http_response+i));        
         //putchar(http_response[i]);
       }
       for (i = 0; i < strlen(end_marker); i++) {
-        poke(154, RS232_HANDLER);
         cbm_k_bsout(end_marker[i]);
-        poke(154, 3);
       }
+      poke(154, 3);
       free(http_response);
     }
   } else {
