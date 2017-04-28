@@ -91,19 +91,7 @@ const char RESPONSE_MEMORY_PROBLEM = 5;
 char* to_lower(char* input_str) {
   int i = 0;
   while(input_str[i]) {
-    if ((int)input_str[i] >=97 && (int)input_str[i] <= 122) {
-      input_str[i] = (int)input_str[i] - 32;
-    }
-    i++;
-  }
-  return input_str;
-}
-
-// Converts the input_str to upper (replacing the original).
-char* to_upper(char* input_str) {
-  int i = 0;
-  while(input_str[i]) {
-    input_str[i] = toupper(input_str[i]);
+    input_str[i] = tolower(input_str[i]);
     i++;
   }
   return input_str;
@@ -112,7 +100,7 @@ char* to_upper(char* input_str) {
 // Prints the intro text.
 void print_intro() {
   int i = 0;
-  for(; i < 40; i++) {
+  for(; i < 25; i++) {
     printf('\n');
   }
   poke(53280, 0);
@@ -146,15 +134,15 @@ unsigned int open_rs232() {
 bool _is_request_end(char* buffer, unsigned int size) {
   if (size >= 4) {
     // Can be either 2* \n or 2* \r\n.
-    if ((buffer[size-1] == '\n' && buffer[size-2] == '\n') ||
-        (buffer[size-1] == '\n' && buffer[size-3] == '\n')) {
+    if ((buffer[size-1] == 10 && buffer[size-2] == 10) ||
+        (buffer[size-1] == 10 && buffer[size-3] == 10)) {
       return true;
     } else {
       return false;
     }
   } else if (size >= 2) {
     // Can only be \n\n.
-    return (buffer[size-1] == '\n' && buffer[size-2] == '\n');
+    return (buffer[size-1] == 10 && buffer[size-2] == 10);
   }
   return false;
 }
@@ -169,17 +157,17 @@ char _parse_request(char* request, struct http_request* result) {
   if (first_line_end) {
     strncpy(HTTP_REQUEST_FIRST_LINE, request, first_line_end-request);
     to_lower(HTTP_REQUEST_FIRST_LINE);
-    if (HTTP_REQUEST_FIRST_LINE[1] == 'G' &&
-        HTTP_REQUEST_FIRST_LINE[2] == 'E' &&
-        HTTP_REQUEST_FIRST_LINE[3] == 'T' &&
+    if (HTTP_REQUEST_FIRST_LINE[1] == 'g' &&
+        HTTP_REQUEST_FIRST_LINE[2] == 'e' &&
+        HTTP_REQUEST_FIRST_LINE[3] == 't' &&
         HTTP_REQUEST_FIRST_LINE[4] == ' ') {
       // GET request.
       result->method = REQUEST_METHOD_GET;
     } else {
-      if (HTTP_REQUEST_FIRST_LINE[1] == 'P' &&
-          HTTP_REQUEST_FIRST_LINE[2] == 'O' &&
-          HTTP_REQUEST_FIRST_LINE[3] == 'S' &&
-          HTTP_REQUEST_FIRST_LINE[4] == 'T' &&
+      if (HTTP_REQUEST_FIRST_LINE[1] == 'p' &&
+          HTTP_REQUEST_FIRST_LINE[2] == 'o' &&
+          HTTP_REQUEST_FIRST_LINE[3] == 's' &&
+          HTTP_REQUEST_FIRST_LINE[4] == 't' &&
           HTTP_REQUEST_FIRST_LINE[5] == ' ') {
         // POST request.
         result->method = REQUEST_METHOD_POST;
@@ -207,19 +195,13 @@ char _parse_request(char* request, struct http_request* result) {
 }
 
 void _content_type(const char* filename, char* result) {
-  char* file_extension;
-  char* comma_pos;
-  char* stripped_ext = "     ";
-  file_extension = strstr(filename, ".") + 1;
-  comma_pos = strstr(filename, ",");
-  memcpy(stripped_ext, file_extension, comma_pos-file_extension);
-  stripped_ext[comma_pos-file_extension] = 0;
-  if (strcmp(stripped_ext, "png") == 0) {
-    strcpy(result, "image/png");
-  } else if (strcmp(stripped_ext, "htm") == 0) {
-    strcpy(result, "text/html");
+  char* file_extension = strstr(filename, ".") + 1;
+  if (strcmp(file_extension, "png") == 0) {
+    result = "image/png";
+  } else if (strcmp(file_extension, "htm") == 0) {
+    result = "text/html";
   } else {
-    strcpy(result, "text/html");
+    result = "text/html";
   }
   return;
 }
@@ -231,13 +213,13 @@ char _create_response(const struct http_request* request, char* response,
   // 16 (max on C64) + 1 byte for \0 + 6 for disk ID and mode.
   unsigned char* filename = (unsigned char*) malloc(16+1+5);
   unsigned char* file_data = (unsigned char*) malloc(1024);
-  unsigned char ctbuf[20];
   int file_size = -1;
   int response_code = RESPONSE_OK;
   int open_code = 0;
   int offset = 0;
   int i = 0;
   char* content_length_str = "    ";  // Helper string to store CL as string.
+  char* ctbuf;
   int length = 0;
 
   sprintf(response, "http/1.1 ");
@@ -252,8 +234,7 @@ char _create_response(const struct http_request* request, char* response,
       sprintf(filename, "0:index.htm,s,r");
     } else {
       // +1 to trim leading '/'
-      to_lower((request->url)+1);
-      sprintf(filename, "0:%s,s,r", (request->url)+1);
+      sprintf(filename, "0:%s,s,r", to_lower(request->url+1));
     }
     printf("Opening %s...\n", filename);
     open_code = cbm_open(6, 8, CBM_READ, filename);
@@ -280,19 +261,32 @@ char _create_response(const struct http_request* request, char* response,
         strcat(response, "\r\n");
       } else {
         sprintf(content_length_str, "%d", file_size);
+
         strcat(response, HTTP_RESPONSE_CODE_200);
         strcat(response, "\r\n");
-        strcat(response, "content-type: ");
+        strcat(response, "content-type ");
+        ctbuf = (char*) malloc(20);
+        if (!ctbuf) {
+          printf("Could't allocate 20 bytes for content type.");
+          return RESPONSE_MEMORY_PROBLEM;
+        }
         _content_type(filename, ctbuf);
-        strcat(response, to_lower(ctbuf));
+        strcat(response, ctbuf);
+        free(ctbuf);
         strcat(response, "\r\n");
         strcat(response, "content-length: ");
         strcat(response, content_length_str);
-        strcat(response, "\r\n\r\n");
+        strcat(response, "\r\n");
         length = strlen(response);  // Accumulate length up to here,
         offset = strlen(response);
-        memcpy(response + offset, file_data, file_size);
-        length += file_size;
+        for (i = 0; i < file_size; i++) {
+          *(response + offset + i) = *(file_data + i);
+          length++;
+        }
+        *(response + offset + i) = '\r';
+        *(response + offset + i + 1) = '\n';
+        *(response + offset + i + 2) = 0;
+        length += 3;
         *response_length = length;
       }
       cbm_close(6);  // Close the file only if it has been opened.
@@ -310,30 +304,21 @@ void _handle_request(char* request, unsigned int size) {
   char response_code;
   char* http_response;
   int length = 0;
-  char* end_marker = ":end:";
-  to_upper(request);
   printf("Serving request:\n");
   for(; i < size; i++) {
     putchar(request[i]);
-  }  
+  }
   parse_code = _parse_request(request, &PARSED_REQUEST);
   if (parse_code == PARSE_RESULT_OK) {
     http_response = (unsigned char*) malloc(MAX_REQUEST_SIZE);
     if (http_response) {
       int length = 0;
       response_code = _create_response(&PARSED_REQUEST, http_response, &length);
-      poke(154, RS232_HANDLER);
-      for (i = 0; i < length; i++) {
-        //if (_oserror = cbm_k_ckout(RS232_HANDLER)) {
-        //  printf("Error opening output channel %d", _oserror);
-        //}        
-        cbm_k_bsout(*(http_response+i));        
-        //putchar(http_response[i]);
+      if (response_code == RESPONSE_OK) {
+        for (i = 0; i < length; i++) {
+          putchar(http_response[i]);
+        }
       }
-      for (i = 0; i < strlen(end_marker); i++) {
-        cbm_k_bsout(end_marker[i]);
-      }
-      poke(154, 3);
       free(http_response);
     }
   } else {
@@ -364,7 +349,7 @@ void main_loop() {
         }
         printf (".");
       }
-      if (c == '\n' && _is_request_end(REQUEST_BUF, cur_char_idx)) {
+      if (c == 10 && _is_request_end(REQUEST_BUF, cur_char_idx)) {
         printf ("]\n");
         REQUEST_BUF[cur_char_idx] = 0;  // Make 0-terminated string.
         _handle_request(REQUEST_BUF, cur_char_idx);
