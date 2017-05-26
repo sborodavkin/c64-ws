@@ -131,18 +131,28 @@ unsigned int open_rs232() {
 }
 
 // Check if buffer ends with an empty line (either \n\n or \r\n\r\n).
-bool _is_request_end(char* buffer, unsigned int size) {
-  if (size >= 4) {
-    // Can be either 2* \n or 2* \r\n.
-    if ((buffer[size-1] == 10 && buffer[size-2] == 10) ||
-        (buffer[size-1] == 10 && buffer[size-3] == 10)) {
-      return true;
-    } else {
-      return false;
+bool _is_request_end(const unsigned char* buffer, unsigned int size) {
+  unsigned char dbl_crlf_hw[] = {0x0D, 0x0D, 0x0A, 0x0D, 0x0D, 0x0A};
+  unsigned char dbl_crlf[] = {0x0D, 0x0A, 0x0D, 0x0A};  
+  int i = 0;
+  if (size >= 6) {
+    // Real HW only: 2* 0D.0D.0A, emu: 2* 0D.0A
+    printf("OLOLOSTART\n");
+    for (i=0;i<4;i++) {
+      printf("%d ", *(buffer+size-4+i));
     }
+    return (memcmp(*(buffer+size-6), dbl_crlf_hw, 6) == 0) ||
+      (memcmp(*(buffer+size-4), dbl_crlf, 4) == 0));
+  } else if (size >= 4) {
+    printf("TROOLOLOSTART\n");
+    for (i=0;i<4;i++) {
+      printf("%d ", *(buffer+size-4+i));
+    }  
+    // Real HW: \n\n or emu: \r\n\r\n, both end up with 2* 0D.0A
+    return (memcmp(*(buffer+size-4), dbl_crlf, 4) == 0);
   } else if (size >= 2) {
-    // Can only be \n\n.
-    return (buffer[size-1] == 10 && buffer[size-2] == 10);
+    // Emu only: \n\n which is 0A.0A
+    return (buffer[size-1] == 0x0A && buffer[size-2] == 0x0A);
   }
   return false;
 }
