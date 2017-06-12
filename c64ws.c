@@ -103,9 +103,9 @@ void print_intro() {
   for(; i < 25; i++) {
     printf('\n');
   }
-  poke(53280, 0);
-  poke(53281, 0);
-  poke(646, 5);
+  //poke(53280, 0);
+  //poke(53281, 0);
+  //poke(646, 5);
 
   cbm_k_clr();
   printf("**************************************\n");
@@ -135,21 +135,31 @@ bool _is_request_end(const unsigned char* buffer, unsigned int size) {
   unsigned char dbl_crlf_hw[] = {0x0D, 0x0D, 0x0A, 0x0D, 0x0D, 0x0A};
   unsigned char dbl_crlf[] = {0x0D, 0x0A, 0x0D, 0x0A};  
   int i = 0;
+  int r1 = 0;
+  int r2 = 0;
   if (size >= 6) {
     // Real HW only: 2* 0D.0D.0A, emu: 2* 0D.0A
-    printf("OLOLOSTART\n");
+    printf("\n=== COMPARE 6: ===\n");
+    printf("DBL_CRLF:\n");
     for (i=0;i<4;i++) {
-      printf("%d ", *(buffer+size-4+i));
+      printf("%02x ", dbl_crlf[i]);
     }
-    return (memcmp(*(buffer+size-6), dbl_crlf_hw, 6) == 0) ||
-      (memcmp(*(buffer+size-4), dbl_crlf, 4) == 0));
+    r1 = memcmp(buffer+size-4, dbl_crlf, 4);
+    printf("\nR1 = %d", r1);    
+    printf("\nDBL_CRLF_HW:\n");
+    for (i=0;i<6;i++) {
+      printf("%02x ", dbl_crlf_hw[i]);
+    }
+    r2 = memcmp(buffer+size-6, dbl_crlf_hw, 6);
+    printf("\nR2 = %d", r2);
+    printf("\nLAST 6 BUFFER BYTES:\n");        
+    for (i=0;i<6;i++) {
+      printf("%02x ", *(buffer+size-6+i));
+    }    
+    return (!r1 || !r2);
   } else if (size >= 4) {
-    printf("TROOLOLOSTART\n");
-    for (i=0;i<4;i++) {
-      printf("%d ", *(buffer+size-4+i));
-    }  
     // Real HW: \n\n or emu: \r\n\r\n, both end up with 2* 0D.0A
-    return (memcmp(*(buffer+size-4), dbl_crlf, 4) == 0);
+    return !memcmp(buffer+size-4, dbl_crlf, 4);
   } else if (size >= 2) {
     // Emu only: \n\n which is 0A.0A
     return (buffer[size-1] == 0x0A && buffer[size-2] == 0x0A);
@@ -162,27 +172,23 @@ char _parse_request(char* request, struct http_request* result) {
   const char *first_line_end;
   char* space_1_idx;
   char* space_2_idx;
+  char lf[] = {0x0D};
 
-  first_line_end = strchr(request, '\n');
+  first_line_end = strchr(request, 0x0D);
   if (first_line_end) {
     strncpy(HTTP_REQUEST_FIRST_LINE, request, first_line_end-request);
     to_lower(HTTP_REQUEST_FIRST_LINE);
-    if (HTTP_REQUEST_FIRST_LINE[1] == 'g' &&
-        HTTP_REQUEST_FIRST_LINE[2] == 'e' &&
-        HTTP_REQUEST_FIRST_LINE[3] == 't' &&
-        HTTP_REQUEST_FIRST_LINE[4] == ' ') {
+    printf("HTTP_REQUEST_FIRST_LINE=");
+    printf(HTTP_REQUEST_FIRST_LINE);
+    if (memcmp(HTTP_REQUEST_FIRST_LINE, "get ", 4) == 0) {
       // GET request.
       result->method = REQUEST_METHOD_GET;
     } else {
-      if (HTTP_REQUEST_FIRST_LINE[1] == 'p' &&
-          HTTP_REQUEST_FIRST_LINE[2] == 'o' &&
-          HTTP_REQUEST_FIRST_LINE[3] == 's' &&
-          HTTP_REQUEST_FIRST_LINE[4] == 't' &&
-          HTTP_REQUEST_FIRST_LINE[5] == ' ') {
+      if (memcmp(HTTP_REQUEST_FIRST_LINE, "post ", 5) == 0) {
         // POST request.
         result->method = REQUEST_METHOD_POST;
       }
-    }
+    } 
     if (result->method) {
       space_1_idx = strchr(HTTP_REQUEST_FIRST_LINE, ' ');
       if (space_1_idx) {
